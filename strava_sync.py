@@ -14,11 +14,6 @@ GOOGLE_CREDENTIALS_JSON = os.environ["GOOGLE_CREDENTIALS_JSON"]
 
 SHEET_NAME = "Plan"
 
-# Column indices (1-based) in the Plan sheet
-COL_DATE = 2           # B - Date
-COL_ACTUAL_DISTANCE = 14  # N - Actual Distance (km)  — insert new col
-COL_ACTUAL_HR = 11     # K - Actual Avg HR (bpm)
-
 
 def get_strava_token():
     resp = requests.post("https://www.strava.com/oauth/token", data={
@@ -51,19 +46,29 @@ def get_strava_activities(token):
 
 
 def build_activity_map(activities):
-    """Map date string (YYYY-MM-DD) -> {distance_km, avg_hr}"""
+    """Map date string (YYYY-MM-DD) -> {distance_km, avg_hr, avg_pace}"""
     activity_map = {}
     for a in activities:
         if a.get("type") not in ("Run", "VirtualRun"):
             continue
-        date_str = a["start_date_local"][:10]  # YYYY-MM-DD
+        date_str = a["start_date_local"][:10]
         distance_km = round(a["distance"] / 1000, 2)
         avg_hr = a.get("average_heartrate")
+        # average_speed is in m/s -> convert to min/km
+        avg_speed = a.get("average_speed")
+        if avg_speed and avg_speed > 0:
+            pace_sec_per_km = 1000 / avg_speed
+            pace_min = int(pace_sec_per_km // 60)
+            pace_sec = int(pace_sec_per_km % 60)
+            avg_pace = f"{pace_min}:{pace_sec:02d}"
+        else:
+            avg_pace = None
         # If multiple runs on same day, keep the longer one
         if date_str not in activity_map or distance_km > activity_map[date_str]["distance_km"]:
             activity_map[date_str] = {
                 "distance_km": distance_km,
-                "avg_hr": round(avg_hr) if avg_hr else None
+                "avg_hr": round(avg_hr) if avg_hr else None,
+                "avg_pace": avg_pace
             }
     return activity_map
 
@@ -78,11 +83,11 @@ def normalize_date(raw):
             return datetime.strptime(raw, fmt).strftime("%Y-%m-%d")
         except ValueError:
             continue
-    # Handle Excel serial dates (pandas sometimes returns these as strings)
     try:
+        from datetime import timedelta
         serial = int(raw)
         base = datetime(1899, 12, 30)
-        return (base + __import__('timedelta', fromlist=['timedelta'])(days=serial)).strftime("%Y-%m-%d")
+        return (base + timedelta(days=serial)).strftime("%Y-%m-%d")
     except Exception:
         pass
     return None
@@ -100,7 +105,6 @@ def sync_to_sheet(activity_map):
     all_rows = sheet.get_all_values()
     header = all_rows[0]
 
-    # Find column indices from header (0-based for list, but gspread uses 1-based for update)
     def col_index(name):
         for i, h in enumerate(header):
             if name.lower() in h.lower():
@@ -110,16 +114,16 @@ def sync_to_sheet(activity_map):
     date_col = col_index("date")
     hr_col = col_index("actual avg hr")
     dist_col = col_index("planned distance")
+    pace_col = col_index("average pace")
 
-    # Fall back to known positions if headers not matched
-    if date_col is None: date_col = 1   # column B
-    if hr_col is None: hr_col = 10      # column K
-    if dist_col is None: dist_col = 8   # column I (Planned Distance)
+    if date_col is None: date_col = 1
+    if hr_col is None: hr_col = 10
+    if dist_col is None: dist_col = 8
 
     updates = []
     updated_count = 0
 
-    for row_idx, row in enumerate(all_rows[1:], start=2):  # start=2 for 1-based sheet rows
+    for row_idx, row in enumerate(all_rows[1:], start=2):
         if date_col >= len(row):
             continue
         raw_date = row[date_col]
@@ -129,21 +133,25 @@ def sync_to_sheet(activity_map):
 
         activity = activity_map[date_str]
 
-        # Update HR
         if activity["avg_hr"] is not None:
             updates.append({
                 "range": gspread.utils.rowcol_to_a1(row_idx, hr_col + 1),
                 "values": [[activity["avg_hr"]]]
             })
 
-        # Update distance
         updates.append({
             "range": gspread.utils.rowcol_to_a1(row_idx, dist_col + 1),
             "values": [[activity["distance_km"]]]
         })
 
+        if pace_col is not None and activity["avg_pace"] is not None:
+            updates.append({
+                "range": gspread.utils.rowcol_to_a1(row_idx, pace_col + 1),
+                "values": [[activity["avg_pace"]]]
+            })
+
         updated_count += 1
-        print(f"  Row {row_idx} ({date_str}): {activity['distance_km']} km, HR={activity['avg_hr']}")
+        print(f"  Row {row_idx} ({date_str}): {activity['distance_km']} km, HR={activity['avg_hr']}, Pace={activity['avg_pace']}")
 
     if updates:
         sheet.batch_update(updates)
