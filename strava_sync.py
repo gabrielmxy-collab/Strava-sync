@@ -109,12 +109,12 @@ def sync_to_sheet(activity_map):
 
     date_col = col_index("date")
     hr_col = col_index("actual avg hr")
-    dist_col = col_index("actual") if col_index("actual distance") is None else col_index("actual distance")
+    dist_col = col_index("planned distance")
 
     # Fall back to known positions if headers not matched
     if date_col is None: date_col = 1   # column B
     if hr_col is None: hr_col = 10      # column K
-    if dist_col is None: dist_col = 13  # column N
+    if dist_col is None: dist_col = 8   # column I (Planned Distance)
 
     updates = []
     updated_count = 0
