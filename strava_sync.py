@@ -2,8 +2,9 @@ import os
 import requests
 import gspread
 from google.oauth2.service_account import Credentials
-from datetime import datetime, timezone
+from datetime import datetime
 import json
+import time
 
 # --- Config from environment variables ---
 STRAVA_CLIENT_ID = os.environ["STRAVA_CLIENT_ID"]
@@ -13,6 +14,20 @@ GOOGLE_SHEET_ID = os.environ["GOOGLE_SHEET_ID"]
 GOOGLE_CREDENTIALS_JSON = os.environ["GOOGLE_CREDENTIALS_JSON"]
 
 SHEET_NAME = "Plan"
+MAX_RETRIES = 3
+RETRY_DELAY = 30  # seconds between retries
+
+
+def with_retry(func, *args, **kwargs):
+    """Call a function with automatic retries on failure."""
+    for attempt in range(1, MAX_RETRIES + 1):
+        try:
+            return func(*args, **kwargs)
+        except Exception as e:
+            if attempt == MAX_RETRIES:
+                raise
+            print(f"  ⚠️  Attempt {attempt} failed: {e}. Retrying in {RETRY_DELAY}s...")
+            time.sleep(RETRY_DELAY)
 
 
 def get_strava_token():
@@ -54,7 +69,6 @@ def build_activity_map(activities):
         date_str = a["start_date_local"][:10]
         distance_km = round(a["distance"] / 1000, 2)
         avg_hr = a.get("average_heartrate")
-        # average_speed is in m/s -> convert to min/km
         avg_speed = a.get("average_speed")
         if avg_speed and avg_speed > 0:
             pace_sec_per_km = 1000 / avg_speed
@@ -63,7 +77,6 @@ def build_activity_map(activities):
             avg_pace = f"{pace_min}:{pace_sec:02d}"
         else:
             avg_pace = None
-        # If multiple runs on same day, keep the longer one
         if date_str not in activity_map or distance_km > activity_map[date_str]["distance_km"]:
             activity_map[date_str] = {
                 "distance_km": distance_km,
@@ -162,17 +175,17 @@ def sync_to_sheet(activity_map):
 
 def main():
     print("🔑 Getting Strava token...")
-    token = get_strava_token()
+    token = with_retry(get_strava_token)
 
     print("🏃 Fetching Strava activities...")
-    activities = get_strava_activities(token)
+    activities = with_retry(get_strava_activities, token)
     print(f"   Found {len(activities)} total activities")
 
     activity_map = build_activity_map(activities)
     print(f"   {len(activity_map)} unique run dates")
 
     print("📊 Syncing to Google Sheets...")
-    sync_to_sheet(activity_map)
+    with_retry(sync_to_sheet, activity_map)
 
 
 if __name__ == "__main__":
