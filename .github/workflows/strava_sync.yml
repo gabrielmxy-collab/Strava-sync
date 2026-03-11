@@ -2,7 +2,7 @@ name: Strava Sync
 
 on:
   schedule:
-    - cron: '0 2 * * *'  # Runs daily at 2am UTC (10am AEST)
+    - cron: '0 3 * * *'  # Runs daily at 3am UTC (11am SGT)
   workflow_dispatch:       # Allows manual trigger from GitHub UI
 
 jobs:
