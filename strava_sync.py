@@ -15,7 +15,7 @@ GOOGLE_CREDENTIALS_JSON = os.environ["GOOGLE_CREDENTIALS_JSON"]
 
 SHEET_NAME = "Plan"
 MAX_RETRIES = 3
-RETRY_DELAY = 30  # seconds between retries
+RETRY_DELAY = 30 # seconds between retries
 
 
 def with_retry(func, *args, **kwargs):
@@ -26,7 +26,7 @@ def with_retry(func, *args, **kwargs):
         except Exception as e:
             if attempt == MAX_RETRIES:
                 raise
-            print(f"  ⚠️  Attempt {attempt} failed: {e}. Retrying in {RETRY_DELAY}s...")
+            print(f" ⚠️ Attempt {attempt} failed: {e}. Retrying in {RETRY_DELAY}s...")
             time.sleep(RETRY_DELAY)
 
 
@@ -126,12 +126,12 @@ def sync_to_sheet(activity_map):
 
     date_col = col_index("date")
     hr_col = col_index("actual avg hr")
-    dist_col = col_index("planned distance")
+    dist_col = col_index("actual distance")  # <-- changed from "planned distance"
     pace_col = col_index("average pace")
 
     if date_col is None: date_col = 1
     if hr_col is None: hr_col = 10
-    if dist_col is None: dist_col = 8
+    if dist_col is None: dist_col = 9  # fallback: column J (0-indexed)
 
     updates = []
     updated_count = 0
@@ -164,13 +164,13 @@ def sync_to_sheet(activity_map):
             })
 
         updated_count += 1
-        print(f"  Row {row_idx} ({date_str}): {activity['distance_km']} km, HR={activity['avg_hr']}, Pace={activity['avg_pace']}")
+        print(f" Row {row_idx} ({date_str}): {activity['distance_km']} km, HR={activity['avg_hr']}, Pace={activity['avg_pace']}")
 
     if updates:
         sheet.batch_update(updates)
         print(f"\n✅ Updated {updated_count} rows in Google Sheets.")
     else:
-        print("ℹ️  No matching activities found to update.")
+        print("ℹ️ No matching activities found to update.")
 
 
 def main():
@@ -179,10 +179,10 @@ def main():
 
     print("🏃 Fetching Strava activities...")
     activities = with_retry(get_strava_activities, token)
-    print(f"   Found {len(activities)} total activities")
+    print(f" Found {len(activities)} total activities")
 
     activity_map = build_activity_map(activities)
-    print(f"   {len(activity_map)} unique run dates")
+    print(f" {len(activity_map)} unique run dates")
 
     print("📊 Syncing to Google Sheets...")
     with_retry(sync_to_sheet, activity_map)
